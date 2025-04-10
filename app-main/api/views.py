@@ -1,7 +1,7 @@
 # file: api/views.py
 
 import requests
-from django.conf import settings
+# from django.conf import settings    # <-- We no longer need this for HIBP_API_KEY
 from django.contrib.auth.models import Group
 from django.shortcuts import get_object_or_404
 from rest_framework import status
@@ -11,11 +11,25 @@ from rest_framework.views import APIView
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 
-from .models import APIKey, Domain
+from .models import APIKey, Domain, HIBPKey
+from django.core.exceptions import ObjectDoesNotExist
 
+def get_hibp_key():
+    """
+    Retrieve the single HIBPKey record from the database
+    and return its api_key string.
+    """
+    try:
+        hibp_key_obj = HIBPKey.objects.get()
+        return hibp_key_obj.api_key
+    except ObjectDoesNotExist:
+        raise RuntimeError(
+            "No HIBPKey record found in the database. "
+            "Please create one via the Django admin or a migration script."
+        )
 
 # --------------------------------------------------------
-# Old / existing endpoints
+# Existing endpoints
 # --------------------------------------------------------
 
 class StealerLogsProxyView(APIView):
@@ -27,7 +41,6 @@ class StealerLogsProxyView(APIView):
     Proxies to /stealerlogsbyemaildomain/{domain}.
     The domain must be in the requesting API key's authorized domains.
     """
-
     @swagger_auto_schema(
         operation_description=(
             "Proxy to /stealerlogsbyemaildomain/<domain> on HIBP. "
@@ -61,10 +74,10 @@ class StealerLogsProxyView(APIView):
         if not api_key_obj.domains.filter(name=domain).exists():
             raise PermissionDenied(f"API key not authorized for domain '{domain}'")
 
-        # Proxy to the HIBP endpoint
+        # Retrieve HIBP key from the database
         hibp_url = f"https://haveibeenpwned.com/api/v3/stealerlogsbyemaildomain/{domain}"
         headers = {
-            "hibp-api-key": settings.HIBP_API_KEY,
+            "hibp-api-key": get_hibp_key(),  # <---- CHANGED
             "User-Agent": "pwned_proxy_app/1.0"
         }
         try:
@@ -83,7 +96,6 @@ class BreachedDomainProxyView(APIView):
     Proxies to /breacheddomain/<domain>.
     The domain must be in the requesting API key's authorized domains.
     """
-
     @swagger_auto_schema(
         operation_description="Proxy to /breacheddomain/<domain> on HIBP.",
         manual_parameters=[
@@ -112,7 +124,7 @@ class BreachedDomainProxyView(APIView):
 
         hibp_url = f"https://haveibeenpwned.com/api/v3/breacheddomain/{domain}"
         headers = {
-            "hibp-api-key": settings.HIBP_API_KEY,
+            "hibp-api-key": get_hibp_key(),  # <---- CHANGED
             "User-Agent": "pwned_proxy_app/1.0"
         }
         try:
@@ -131,7 +143,6 @@ class BreachedAccountProxyView(APIView):
     Proxies to /breachedaccount/<email>.
     The domain of <email> must be in the requesting API key's authorized domains.
     """
-
     @swagger_auto_schema(
         operation_description=(
             "Proxy to /breachedaccount/<email> on HIBP. "
@@ -174,7 +185,7 @@ class BreachedAccountProxyView(APIView):
 
         hibp_url = f"https://haveibeenpwned.com/api/v3/breachedaccount/{email}"
         headers = {
-            "hibp-api-key": settings.HIBP_API_KEY,
+            "hibp-api-key": get_hibp_key(),  # <---- CHANGED
             "User-Agent": "pwned_proxy_app/1.0"
         }
         try:
@@ -196,7 +207,6 @@ class PasteAccountProxyView(APIView):
     - The domain of the email must match the requesting API key's domain(s).
     - Proxies to /pasteaccount/{account}.
     """
-
     @swagger_auto_schema(
         operation_description=(
             "Proxy to **/pasteaccount/{account}** on Have I Been Pwned. "
@@ -235,7 +245,7 @@ class PasteAccountProxyView(APIView):
             )
 
         hibp_url = f"https://haveibeenpwned.com/api/v3/pasteaccount/{requests.utils.requote_uri(email)}"
-        headers = {"hibp-api-key": settings.HIBP_API_KEY}
+        headers = {"hibp-api-key": get_hibp_key()}  # <---- CHANGED
         try:
             resp = requests.get(hibp_url, headers=headers)
             return Response(resp.json(), status=resp.status_code)
@@ -249,7 +259,6 @@ class SubscribedDomainsProxyView(APIView):
     - Proxies to /subscribeddomains
     - We'll filter the returned data to only include the domain(s) from the API key, if needed.
     """
-
     @swagger_auto_schema(
         operation_description=(
             "Proxy to **/subscribeddomains** on HIBP. "
@@ -272,7 +281,7 @@ class SubscribedDomainsProxyView(APIView):
         domain_names = list(api_key_obj.domains.values_list('name', flat=True))
 
         hibp_url = "https://haveibeenpwned.com/api/v3/subscribeddomains"
-        headers = {"hibp-api-key": settings.HIBP_API_KEY}
+        headers = {"hibp-api-key": get_hibp_key()}  # <---- CHANGED
         try:
             hibp_response = requests.get(hibp_url, headers=headers)
             if hibp_response.status_code != 200:
@@ -299,7 +308,6 @@ class StealerLogsByEmailProxyView(APIView):
     - The email’s domain must be in the API key's domain list.
     - Proxies to /stealerlogsbyemail/{email}.
     """
-
     @swagger_auto_schema(
         operation_description=(
             "Proxy to /stealerlogsbyemail/{email} on HIBP. "
@@ -332,7 +340,7 @@ class StealerLogsByEmailProxyView(APIView):
             raise PermissionDenied(f"API key not authorized for domain '{email_domain}'")
 
         hibp_url = f"https://haveibeenpwned.com/api/v3/stealerlogsbyemail/{requests.utils.requote_uri(email)}"
-        headers = {"hibp-api-key": settings.HIBP_API_KEY}
+        headers = {"hibp-api-key": get_hibp_key()}  # <---- CHANGED
         try:
             resp = requests.get(hibp_url, headers=headers)
             return Response(resp.json(), status=resp.status_code)
@@ -346,7 +354,6 @@ class StealerLogsByWebsiteDomainProxyView(APIView):
     - The <mydomain.com> must be one of the API key's authorized domains.
     - Proxies to /stealerlogsbywebsitedomain/{domain}.
     """
-
     @swagger_auto_schema(
         operation_description=(
             "Proxy to /stealerlogsbywebsitedomain/{domain} on HIBP. "
@@ -375,7 +382,7 @@ class StealerLogsByWebsiteDomainProxyView(APIView):
             raise PermissionDenied(f"API key not authorized for domain '{query_domain}'")
 
         hibp_url = f"https://haveibeenpwned.com/api/v3/stealerlogsbywebsitedomain/{requests.utils.requote_uri(query_domain)}"
-        headers = {"hibp-api-key": settings.HIBP_API_KEY}
+        headers = {"hibp-api-key": get_hibp_key()}  # <---- CHANGED
         try:
             resp = requests.get(hibp_url, headers=headers)
             return Response(resp.json(), status=resp.status_code)
@@ -389,7 +396,6 @@ class StealerLogsByEmailDomainProxyView(APIView):
     - Uses the domain from the API key's first domain (or if there's only one).
     - Proxies to /stealerlogsbyemaildomain/{domain}.
     """
-
     @swagger_auto_schema(
         operation_description=(
             "Proxy to /stealerlogsbyemaildomain/{domain} on HIBP. "
@@ -416,7 +422,7 @@ class StealerLogsByEmailDomainProxyView(APIView):
         domain_name = domain_obj.name
 
         hibp_url = f"https://haveibeenpwned.com/api/v3/stealerlogsbyemaildomain/{domain_name}"
-        headers = {"hibp-api-key": settings.HIBP_API_KEY}
+        headers = {"hibp-api-key": get_hibp_key()}  # <---- CHANGED
         try:
             resp = requests.get(hibp_url, headers=headers)
             return Response(resp.json(), status=resp.status_code)
